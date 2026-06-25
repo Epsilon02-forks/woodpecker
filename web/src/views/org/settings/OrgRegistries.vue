@@ -18,6 +18,7 @@
       v-if="!selectedRegistry"
       v-model="registries"
       :is-deleting="isDeleting"
+      :loading="loading"
       @edit="editRegistry"
       @delete="deleteRegistry"
     />
@@ -33,7 +34,6 @@
 </template>
 
 <script lang="ts" setup>
-import { cloneDeep } from 'lodash';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 
@@ -48,6 +48,7 @@ import useNotifications from '~/compositions/useNotifications';
 import { usePagination } from '~/compositions/usePaginate';
 import { useWPTitle } from '~/compositions/useWPTitle';
 import type { Registry } from '~/lib/api/types';
+import { deepClone } from '~/lib/utils';
 
 const emptyRegistry: Partial<Registry> = {
   address: '',
@@ -63,11 +64,47 @@ const org = requiredInject('org');
 const selectedRegistry = ref<Partial<Registry>>();
 const isEditing = computed(() => !!selectedRegistry.value?.id);
 
-async function loadRegistries(page: number): Promise<Registry[] | null> {
-  return apiClient.getOrgRegistryList(org.value.id, { page });
+async function loadRegistries(page: number, level: 'org' | 'global'): Promise<Registry[] | null> {
+  switch (level) {
+    case 'org':
+      return apiClient.getOrgRegistryList(org.value.id, { page });
+    case 'global':
+      return apiClient.getGlobalRegistryList({ page });
+    default:
+      throw new Error(`Unexpected level: ${level}`);
+  }
 }
 
-const { resetPage, data: registries } = usePagination(loadRegistries, () => !selectedRegistry.value);
+const {
+  resetPage,
+  data: _registries,
+  loading,
+} = usePagination(loadRegistries, () => !selectedRegistry.value, {
+  each: ['org', 'global'],
+});
+const registries = computed(() => {
+  const registriesList: Record<string, Registry & { edit?: boolean; level: 'org' | 'global' }> = {};
+
+  for (const level of ['org', 'global']) {
+    for (const registry of _registries.value) {
+      if (
+        ((level === 'org' && registry.org_id !== 0) || (level === 'global' && registry.org_id === 0)) &&
+        !registriesList[registry.address]
+      ) {
+        registriesList[registry.address] = { ...registry, edit: registry.org_id !== 0, level };
+      }
+    }
+  }
+
+  const levelsOrder = {
+    global: 0,
+    org: 1,
+  };
+
+  return Object.values(registriesList)
+    .toSorted((a, b) => a.address.localeCompare(b.address))
+    .toSorted((a, b) => levelsOrder[b.level] - levelsOrder[a.level]);
+});
 
 const { doSubmit: createRegistry, isLoading: isSaving } = useAsyncAction(async () => {
   if (!selectedRegistry.value) {
@@ -84,21 +121,21 @@ const { doSubmit: createRegistry, isLoading: isSaving } = useAsyncAction(async (
     type: 'success',
   });
   selectedRegistry.value = undefined;
-  resetPage();
+  await resetPage();
 });
 
 const { doSubmit: deleteRegistry, isLoading: isDeleting } = useAsyncAction(async (_registry: Registry) => {
   await apiClient.deleteOrgRegistry(org.value.id, _registry.address);
   notifications.notify({ title: i18n.t('registries.deleted'), type: 'success' });
-  resetPage();
+  await resetPage();
 });
 
 function editRegistry(registry: Registry) {
-  selectedRegistry.value = cloneDeep(registry);
+  selectedRegistry.value = deepClone(registry);
 }
 
 function showAddRegistry() {
-  selectedRegistry.value = cloneDeep(emptyRegistry);
+  selectedRegistry.value = deepClone(emptyRegistry);
 }
 
 useWPTitle(computed(() => [i18n.t('registries.registries'), org.value.name]));

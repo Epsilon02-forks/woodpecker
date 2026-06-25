@@ -67,13 +67,19 @@ func (m *Metadata) Environ() map[string]string {
 	pipeline := m.Curr
 	setNonEmptyEnvVar(params, "CI_PIPELINE_NUMBER", strconv.FormatInt(pipeline.Number, 10))
 	setNonEmptyEnvVar(params, "CI_PIPELINE_PARENT", strconv.FormatInt(pipeline.Parent, 10))
-	setNonEmptyEnvVar(params, "CI_PIPELINE_EVENT", pipeline.Event)
+	setNonEmptyEnvVar(params, "CI_PIPELINE_EVENT", string(pipeline.Event))
+	setNonEmptyEnvVar(params, "CI_PIPELINE_EVENT_REASON", strings.Join(pipeline.EventReason, ","))
 	setNonEmptyEnvVar(params, "CI_PIPELINE_URL", m.getPipelineWebURL(pipeline, 0))
 	setNonEmptyEnvVar(params, "CI_PIPELINE_FORGE_URL", pipeline.ForgeURL)
 	setNonEmptyEnvVar(params, "CI_PIPELINE_DEPLOY_TARGET", pipeline.DeployTo)
 	setNonEmptyEnvVar(params, "CI_PIPELINE_DEPLOY_TASK", pipeline.DeployTask)
 	setNonEmptyEnvVar(params, "CI_PIPELINE_CREATED", strconv.FormatInt(pipeline.Created, 10))
 	setNonEmptyEnvVar(params, "CI_PIPELINE_STARTED", strconv.FormatInt(pipeline.Started, 10))
+	setNonEmptyEnvVar(params, "CI_PIPELINE_AUTHOR", pipeline.Author)
+	setNonEmptyEnvVar(params, "CI_PIPELINE_AVATAR", pipeline.Avatar)
+	if pipeline.RerunCount > 0 {
+		setNonEmptyEnvVar(params, "CI_PIPELINE_RERUNS", strconv.FormatInt(pipeline.RerunCount, 10))
+	}
 
 	workflow := m.Workflow
 	setNonEmptyEnvVar(params, "CI_WORKFLOW_NAME", workflow.Name)
@@ -91,21 +97,22 @@ func (m *Metadata) Environ() map[string]string {
 	setNonEmptyEnvVar(params, "CI_COMMIT_REFSPEC", commit.Refspec)
 	setNonEmptyEnvVar(params, "CI_COMMIT_MESSAGE", commit.Message)
 	setNonEmptyEnvVar(params, "CI_COMMIT_BRANCH", commit.Branch)
+	setNonEmptyEnvVar(params, "CI_COMMIT_TIMESTAMP", strconv.FormatInt(commit.Timestamp, 10))
 	setNonEmptyEnvVar(params, "CI_COMMIT_AUTHOR", commit.Author.Name)
 	setNonEmptyEnvVar(params, "CI_COMMIT_AUTHOR_EMAIL", commit.Author.Email)
-	setNonEmptyEnvVar(params, "CI_COMMIT_AUTHOR_AVATAR", commit.Author.Avatar)
-	if pipeline.Event == EventTag || pipeline.Event == EventRelease || strings.HasPrefix(pipeline.Commit.Ref, "refs/tags/") {
-		setNonEmptyEnvVar(params, "CI_COMMIT_TAG", strings.TrimPrefix(pipeline.Commit.Ref, "refs/tags/"))
+	if p, f := strings.CutPrefix(pipeline.Commit.Ref, "refs/tags/"); f {
+		setNonEmptyEnvVar(params, "CI_COMMIT_TAG", p)
 	}
 	if pipeline.Event == EventRelease {
 		setNonEmptyEnvVar(params, "CI_COMMIT_PRERELEASE", strconv.FormatBool(pipeline.Commit.IsPrerelease))
 	}
-	if pipeline.Event == EventPull || pipeline.Event == EventPullClosed {
+	if pipeline.Event.IsPull() {
 		sourceBranch, targetBranch := getSourceTargetBranches(commit.Refspec)
 		setNonEmptyEnvVar(params, "CI_COMMIT_SOURCE_BRANCH", sourceBranch)
 		setNonEmptyEnvVar(params, "CI_COMMIT_TARGET_BRANCH", targetBranch)
 		setNonEmptyEnvVar(params, "CI_COMMIT_PULL_REQUEST", pullRegexp.FindString(pipeline.Commit.Ref))
 		setNonEmptyEnvVar(params, "CI_COMMIT_PULL_REQUEST_LABELS", strings.Join(pipeline.Commit.PullRequestLabels, ","))
+		setNonEmptyEnvVar(params, "CI_COMMIT_PULL_REQUEST_MILESTONE", pipeline.Commit.PullRequestMilestone)
 	}
 
 	// Only export changed files if maxChangedFiles is not exceeded
@@ -124,7 +131,8 @@ func (m *Metadata) Environ() map[string]string {
 	prevPipeline := m.Prev
 	setNonEmptyEnvVar(params, "CI_PREV_PIPELINE_NUMBER", strconv.FormatInt(prevPipeline.Number, 10))
 	setNonEmptyEnvVar(params, "CI_PREV_PIPELINE_PARENT", strconv.FormatInt(prevPipeline.Parent, 10))
-	setNonEmptyEnvVar(params, "CI_PREV_PIPELINE_EVENT", prevPipeline.Event)
+	setNonEmptyEnvVar(params, "CI_PREV_PIPELINE_EVENT", string(prevPipeline.Event))
+	setNonEmptyEnvVar(params, "CI_PREV_PIPELINE_EVENT_REASON", strings.Join(prevPipeline.EventReason, ","))
 	setNonEmptyEnvVar(params, "CI_PREV_PIPELINE_URL", m.getPipelineWebURL(prevPipeline, 0))
 	setNonEmptyEnvVar(params, "CI_PREV_PIPELINE_FORGE_URL", prevPipeline.ForgeURL)
 	setNonEmptyEnvVar(params, "CI_PREV_COMMIT_URL", prevPipeline.ForgeURL) // why commit url?
@@ -134,6 +142,8 @@ func (m *Metadata) Environ() map[string]string {
 	setNonEmptyEnvVar(params, "CI_PREV_PIPELINE_CREATED", strconv.FormatInt(prevPipeline.Created, 10))
 	setNonEmptyEnvVar(params, "CI_PREV_PIPELINE_STARTED", strconv.FormatInt(prevPipeline.Started, 10))
 	setNonEmptyEnvVar(params, "CI_PREV_PIPELINE_FINISHED", strconv.FormatInt(prevPipeline.Finished, 10))
+	setNonEmptyEnvVar(params, "CI_PREV_PIPELINE_AUTHOR", prevPipeline.Author)
+	setNonEmptyEnvVar(params, "CI_PREV_PIPELINE_AVATAR", prevPipeline.Avatar)
 
 	prevCommit := prevPipeline.Commit
 	setNonEmptyEnvVar(params, "CI_PREV_COMMIT_SHA", prevCommit.Sha)
@@ -141,14 +151,18 @@ func (m *Metadata) Environ() map[string]string {
 	setNonEmptyEnvVar(params, "CI_PREV_COMMIT_REFSPEC", prevCommit.Refspec)
 	setNonEmptyEnvVar(params, "CI_PREV_COMMIT_MESSAGE", prevCommit.Message)
 	setNonEmptyEnvVar(params, "CI_PREV_COMMIT_BRANCH", prevCommit.Branch)
+	setNonEmptyEnvVar(params, "CI_PREV_COMMIT_TIMESTAMP", strconv.FormatInt(prevCommit.Timestamp, 10))
 	setNonEmptyEnvVar(params, "CI_PREV_COMMIT_AUTHOR", prevCommit.Author.Name)
 	setNonEmptyEnvVar(params, "CI_PREV_COMMIT_AUTHOR_EMAIL", prevCommit.Author.Email)
-	setNonEmptyEnvVar(params, "CI_PREV_COMMIT_AUTHOR_AVATAR", prevCommit.Author.Avatar)
-	if prevPipeline.Event == EventPull || prevPipeline.Event == EventPullClosed {
+	if prevPipeline.Event.IsPull() {
 		prevSourceBranch, prevTargetBranch := getSourceTargetBranches(prevCommit.Refspec)
 		setNonEmptyEnvVar(params, "CI_PREV_COMMIT_SOURCE_BRANCH", prevSourceBranch)
 		setNonEmptyEnvVar(params, "CI_PREV_COMMIT_TARGET_BRANCH", prevTargetBranch)
 	}
+
+	// TODO Deprecated, remove in next major
+	setNonEmptyEnvVar(params, "CI_COMMIT_AUTHOR_AVATAR", pipeline.Avatar)
+	setNonEmptyEnvVar(params, "CI_PREV_COMMIT_AUTHOR_AVATAR", prevPipeline.Avatar)
 
 	return params
 }

@@ -15,8 +15,11 @@
 package compiler
 
 import (
+	"errors"
 	"fmt"
+	"maps"
 	"path"
+	"slices"
 
 	backend_types "go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/types"
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/metadata"
@@ -40,10 +43,10 @@ type Secret struct {
 	Name           string
 	Value          string
 	AllowedPlugins []string
-	Events         []string
+	Events         []metadata.Event
 }
 
-func (s *Secret) Available(event string, container *yaml_types.Container) error {
+func (s *Secret) Available(event metadata.Event, container *yaml_types.Container) error {
 	onlyAllowSecretForPlugins := len(s.AllowedPlugins) > 0
 	if onlyAllowSecretForPlugins && !container.IsPlugin() {
 		return fmt.Errorf("secret %q is only allowed to be used by plugins (a filter has been set on the secret). Note: Image filters do not work for normal steps", s.Name)
@@ -62,23 +65,17 @@ func (s *Secret) Available(event string, container *yaml_types.Container) error 
 
 // Match returns true if an image and event match the restricted list.
 // Note that EventPullClosed are treated as EventPull.
-func (s *Secret) Match(event string) bool {
+func (s *Secret) Match(event metadata.Event) bool {
 	// if there is no filter set secret matches all webhook events
 	if len(s.Events) == 0 {
 		return true
 	}
 	// treat all pull events the same way
-	if event == "pull_request_closed" {
-		event = "pull_request"
+	if event.IsPull() {
+		event = metadata.EventPull
 	}
 	// one match is enough
-	for _, e := range s.Events {
-		if e == event {
-			return true
-		}
-	}
-	// a filter is set but the webhook did not match it
-	return false
+	return slices.Contains(s.Events, event)
 }
 
 // Compiler compiles the yaml.
@@ -98,6 +95,8 @@ type Compiler struct {
 	defaultClonePlugin      string
 	trustedClonePlugins     []string
 	securityTrustedPipeline bool
+	// TODO: remove with version 4.x
+	forceIgnoreServiceFailure bool
 }
 
 // New creates a new Compiler with options.
@@ -129,14 +128,10 @@ func (c *Compiler) Compile(conf *yaml_types.Workflow) (*backend_types.Config, er
 	}
 
 	// create a default volume
-	config.Volume = &backend_types.Volume{
-		Name: fmt.Sprintf("%s_default", c.prefix),
-	}
+	config.Volume = fmt.Sprintf("%s_default", c.prefix)
 
 	// create a default network
-	config.Network = &backend_types.Network{
-		Name: fmt.Sprintf("%s_default", c.prefix),
-	}
+	config.Network = fmt.Sprintf("%s_default", c.prefix)
 
 	// create secrets for mask
 	for _, sec := range c.secrets {
@@ -196,9 +191,7 @@ func (c *Compiler) Compile(conf *yaml_types.Workflow) (*backend_types.Config, er
 
 			// only inject netrc if it's a trusted repo or a trusted plugin
 			if c.securityTrustedPipeline || (container.IsPlugin() && container.IsTrustedCloneImage(c.trustedClonePlugins)) {
-				for k, v := range c.cloneEnv {
-					step.Environment[k] = v
-				}
+				maps.Copy(step.Environment, c.cloneEnv)
 			}
 
 			stage.Steps = append(stage.Steps, step)
@@ -229,6 +222,11 @@ func (c *Compiler) Compile(conf *yaml_types.Workflow) (*backend_types.Config, er
 	}
 
 	// add pipeline steps
+	stepNames := make(map[string]struct{}, len(conf.Steps.ContainerList))
+	for _, container := range conf.Steps.ContainerList {
+		stepNames[container.Name] = struct{}{}
+	}
+
 	steps := make([]*dagCompilerStep, 0, len(conf.Steps.ContainerList))
 	for pos, container := range conf.Steps.ContainerList {
 		// Skip if local and should not run local
@@ -253,9 +251,7 @@ func (c *Compiler) Compile(conf *yaml_types.Workflow) (*backend_types.Config, er
 
 		// only inject netrc if it's a trusted repo or a trusted plugin
 		if c.securityTrustedPipeline || (container.IsPlugin() && container.IsTrustedCloneImage(c.trustedClonePlugins)) {
-			for k, v := range c.cloneEnv {
-				step.Environment[k] = v
-			}
+			maps.Copy(step.Environment, c.cloneEnv)
 		}
 
 		steps = append(steps, &dagCompilerStep{
@@ -269,6 +265,15 @@ func (c *Compiler) Compile(conf *yaml_types.Workflow) (*backend_types.Config, er
 	// generate stages out of steps
 	stepStages, err := newDAGCompiler(steps).compile()
 	if err != nil {
+		// If the missing dep exists in the config but isn't in the surviving
+		// step list, it was filtered out by its 'when' conditions. Surface a
+		// more actionable error.
+		var missingDepErr *ErrStepMissingDependency
+		if errors.As(err, &missingDepErr) {
+			if _, inConfig := stepNames[missingDepErr.dep]; inConfig {
+				return nil, &ErrStepFilteredDependency{name: missingDepErr.name, dep: missingDepErr.dep}
+			}
+		}
 		return nil, err
 	}
 

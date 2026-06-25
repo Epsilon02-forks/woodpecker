@@ -21,6 +21,7 @@ import (
 
 	backend_types "go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/types"
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/metadata"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/yaml/constraint"
 	yaml_types "go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/yaml/types"
 	yaml_base_types "go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/yaml/types/base"
 	"go.woodpecker-ci.org/woodpecker/v3/shared/constant"
@@ -29,7 +30,7 @@ import (
 func TestSecretAvailable(t *testing.T) {
 	secret := Secret{
 		AllowedPlugins: []string{},
-		Events:         []string{"push"},
+		Events:         []metadata.Event{"push"},
 	}
 	assert.NoError(t, secret.Available("push", &yaml_types.Container{
 		Image:    "golang",
@@ -40,7 +41,7 @@ func TestSecretAvailable(t *testing.T) {
 	secret = Secret{
 		Name:           "foo",
 		AllowedPlugins: []string{"golang"},
-		Events:         []string{"push"},
+		Events:         []metadata.Event{"push"},
 	}
 	assert.NoError(t, secret.Available("push", &yaml_types.Container{
 		Name:     "step",
@@ -81,12 +82,8 @@ func TestCompilerCompile(t *testing.T) {
 		WithWorkspaceFromURL("/test", repoURL),
 	)
 
-	defaultNetwork := &backend_types.Network{
-		Name: "test_default",
-	}
-	defaultVolume := &backend_types.Volume{
-		Name: "test_default",
-	}
+	defaultNetwork := "test_default"
+	defaultVolume := "test_default"
 
 	defaultCloneStage := &backend_types.Stage{
 		Steps: []*backend_types.Step{{
@@ -95,7 +92,7 @@ func TestCompilerCompile(t *testing.T) {
 			Image:         constant.DefaultClonePlugin,
 			OnSuccess:     true,
 			Failure:       "fail",
-			Volumes:       []string{defaultVolume.Name + ":/woodpecker"},
+			Volumes:       []string{defaultVolume + ":/woodpecker"},
 			WorkingDir:    "/woodpecker/src/github.com/octocat/hello-world",
 			WorkspaceBase: "/woodpecker",
 			Networks:      []backend_types.Conn{{Name: "test_default", Aliases: []string{"clone"}}},
@@ -142,7 +139,7 @@ func TestCompilerCompile(t *testing.T) {
 						Image:         "dummy_img",
 						OnSuccess:     true,
 						Failure:       "fail",
-						Volumes:       []string{defaultVolume.Name + ":/woodpecker"},
+						Volumes:       []string{defaultVolume + ":/woodpecker"},
 						WorkingDir:    "/woodpecker/src/github.com/octocat/hello-world",
 						WorkspaceBase: "/woodpecker",
 						Networks:      []backend_types.Conn{{Name: "test_default", Aliases: []string{"dummy"}}},
@@ -178,7 +175,7 @@ func TestCompilerCompile(t *testing.T) {
 							Commands:      []string{"env"},
 							OnSuccess:     true,
 							Failure:       "fail",
-							Volumes:       []string{defaultVolume.Name + ":/test"},
+							Volumes:       []string{defaultVolume + ":/test"},
 							WorkingDir:    "/test/src/github.com/octocat/hello-world",
 							WorkspaceBase: "/test",
 							Networks:      []backend_types.Conn{{Name: "test_default", Aliases: []string{"echo env"}}},
@@ -192,7 +189,7 @@ func TestCompilerCompile(t *testing.T) {
 							Commands:      []string{"echo 1"},
 							OnSuccess:     true,
 							Failure:       "fail",
-							Volumes:       []string{defaultVolume.Name + ":/test"},
+							Volumes:       []string{defaultVolume + ":/test"},
 							WorkingDir:    "/test/src/github.com/octocat/hello-world",
 							WorkspaceBase: "/test",
 							Networks:      []backend_types.Conn{{Name: "test_default", Aliases: []string{"parallel echo 1"}}},
@@ -206,7 +203,7 @@ func TestCompilerCompile(t *testing.T) {
 							Commands:      []string{"echo 2"},
 							OnSuccess:     true,
 							Failure:       "fail",
-							Volumes:       []string{defaultVolume.Name + ":/test"},
+							Volumes:       []string{defaultVolume + ":/test"},
 							WorkingDir:    "/test/src/github.com/octocat/hello-world",
 							WorkspaceBase: "/test",
 							Networks:      []backend_types.Conn{{Name: "test_default", Aliases: []string{"parallel echo 2"}}},
@@ -226,7 +223,7 @@ func TestCompilerCompile(t *testing.T) {
 				Name:      "echo 1",
 				Image:     "bash",
 				Commands:  []string{"echo 1"},
-				DependsOn: []string{"echo env", "echo 2"},
+				DependsOn: constraint.DependsOn{{Name: "echo env"}, {Name: "echo 2"}},
 			}, {
 				Name:     "echo 2",
 				Image:    "bash",
@@ -243,7 +240,7 @@ func TestCompilerCompile(t *testing.T) {
 						Commands:      []string{"env"},
 						OnSuccess:     true,
 						Failure:       "fail",
-						Volumes:       []string{defaultVolume.Name + ":/test"},
+						Volumes:       []string{defaultVolume + ":/test"},
 						WorkingDir:    "/test/src/github.com/octocat/hello-world",
 						WorkspaceBase: "/test",
 						Networks:      []backend_types.Conn{{Name: "test_default", Aliases: []string{"echo env"}}},
@@ -255,7 +252,7 @@ func TestCompilerCompile(t *testing.T) {
 						Commands:      []string{"echo 2"},
 						OnSuccess:     true,
 						Failure:       "fail",
-						Volumes:       []string{defaultVolume.Name + ":/test"},
+						Volumes:       []string{defaultVolume + ":/test"},
 						WorkingDir:    "/test/src/github.com/octocat/hello-world",
 						WorkspaceBase: "/test",
 						Networks:      []backend_types.Conn{{Name: "test_default", Aliases: []string{"echo 2"}}},
@@ -269,7 +266,7 @@ func TestCompilerCompile(t *testing.T) {
 						Commands:      []string{"echo 1"},
 						OnSuccess:     true,
 						Failure:       "fail",
-						Volumes:       []string{defaultVolume.Name + ":/test"},
+						Volumes:       []string{defaultVolume + ":/test"},
 						WorkingDir:    "/test/src/github.com/octocat/hello-world",
 						WorkspaceBase: "/test",
 						Networks:      []backend_types.Conn{{Name: "test_default", Aliases: []string{"echo 1"}}},
@@ -284,7 +281,7 @@ func TestCompilerCompile(t *testing.T) {
 				Name:     "step",
 				Image:    "bash",
 				Commands: []string{"env"},
-				Environment: yaml_base_types.EnvironmentMap{
+				Environment: map[string]any{
 					"MISSING": map[string]any{"from_secret": "missing"},
 				},
 			}}}},
@@ -296,10 +293,29 @@ func TestCompilerCompile(t *testing.T) {
 			fronConf: &yaml_types.Workflow{Steps: yaml_types.ContainerList{ContainerList: []*yaml_types.Container{{
 				Name:      "dummy",
 				Image:     "dummy_img",
-				DependsOn: []string{"not exist"},
+				DependsOn: constraint.DependsOn{{Name: "not exist"}},
 			}}}},
 			backConf:    nil,
 			expectedErr: "step 'dummy' depends on unknown step 'not exist'",
+		},
+		{
+			name: "workflow with step depending on filtered-out step",
+			fronConf: &yaml_types.Workflow{Steps: yaml_types.ContainerList{ContainerList: []*yaml_types.Container{
+				{
+					Name:  "build",
+					Image: "bash",
+					When: constraint.When{Constraints: []constraint.Constraint{{
+						Event: yaml_base_types.StringOrSlice{"tag"},
+					}}},
+				},
+				{
+					Name:      "deploy",
+					Image:     "bash",
+					DependsOn: constraint.DependsOn{{Name: "build"}},
+				},
+			}}},
+			backConf:    nil,
+			expectedErr: "step 'deploy' depends on step 'build' which is filtered out by its conditions",
 		},
 	}
 
@@ -317,6 +333,120 @@ func TestCompilerCompile(t *testing.T) {
 						assert.Truef(t, s.Environment["VERBOSE"] == "true", "expected to get value of global set environment")
 						assert.Truef(t, len(s.Environment) > 10, "expected to have a lot of built-in variables")
 						s.Environment = nil
+						s.SecretMapping = nil
+					}
+				}
+				// check if we get an expected backend config based on a frontend config
+				assert.EqualValues(t, *test.backConf, *backConf)
+			}
+		})
+	}
+}
+
+func TestCompilerCompileWithFromSecret(t *testing.T) {
+	repoURL := "https://github.com/octocat/hello-world"
+	compiler := New(
+		WithMetadata(metadata.Metadata{
+			Repo: metadata.Repo{
+				Owner:    "octacat",
+				Name:     "hello-world",
+				Private:  true,
+				ForgeURL: repoURL,
+				CloneURL: "https://github.com/octocat/hello-world.git",
+			},
+		}),
+		WithEnviron(map[string]string{
+			"VERBOSE": "true",
+			"COLORED": "true",
+		}),
+		WithSecret(Secret{
+			Name:  "secret_name",
+			Value: "VERY_SECRET",
+		}),
+		WithPrefix("test"),
+		// we use "/test" as custom workspace base to ensure the enforcement of the pluginWorkspaceBase is applied
+		WithWorkspaceFromURL("/test", repoURL),
+	)
+	defaultNetwork := "test_default"
+	defaultVolume := "test_default"
+	defaultCloneStage := &backend_types.Stage{
+		Steps: []*backend_types.Step{{
+			Name:          "clone",
+			Type:          backend_types.StepTypeClone,
+			Image:         constant.DefaultClonePlugin,
+			OnSuccess:     true,
+			Failure:       "fail",
+			WorkingDir:    "/woodpecker/src/github.com/octocat/hello-world",
+			WorkspaceBase: "/woodpecker",
+			Volumes:       []string{defaultVolume + ":/woodpecker"},
+			Networks:      []backend_types.Conn{{Name: "test_default", Aliases: []string{"clone"}}},
+			ExtraHosts:    []backend_types.HostAlias{},
+		}},
+	}
+	tests := []struct {
+		name        string
+		fronConf    *yaml_types.Workflow
+		backConf    *backend_types.Config
+		expectedErr string
+	}{
+		{
+			name: "workflow with missing secret",
+			fronConf: &yaml_types.Workflow{Steps: yaml_types.ContainerList{ContainerList: []*yaml_types.Container{{
+				Name:     "step",
+				Image:    "bash",
+				Commands: []string{"env"},
+				Environment: map[string]any{
+					"SECRET": map[string]any{"from_secret": "secret_name"},
+				},
+			}}}},
+			backConf: &backend_types.Config{
+				Stages: []*backend_types.Stage{defaultCloneStage, {
+					Steps: []*backend_types.Step{{
+						Name:          "step",
+						Type:          backend_types.StepTypeCommands,
+						Image:         "bash",
+						Commands:      []string{"env"},
+						OnSuccess:     true,
+						Failure:       "fail",
+						WorkingDir:    "/test/src/github.com/octocat/hello-world",
+						WorkspaceBase: "/test",
+						Volumes:       []string{defaultVolume + ":/test"},
+						Networks:      []backend_types.Conn{{Name: "test_default", Aliases: []string{"step"}}},
+						ExtraHosts:    []backend_types.HostAlias{},
+						SecretMapping: map[string]string{
+							"SECRET": "VERY_SECRET",
+						},
+					}},
+				}},
+				Volume:  defaultVolume,
+				Network: defaultNetwork,
+				Secrets: []*backend_types.Secret{{
+					Name:  "secret_name",
+					Value: "VERY_SECRET",
+				}},
+			},
+			expectedErr: "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			backConf, err := compiler.Compile(test.fronConf)
+			if test.expectedErr != "" {
+				assert.Error(t, err)
+				assert.Equal(t, test.expectedErr, err.Error())
+			} else {
+				// we ignore uuids in steps and only check if global env got set ...
+				for _, st := range backConf.Stages {
+					for _, s := range st.Steps {
+						s.UUID = ""
+						assert.Truef(t, s.Environment["VERBOSE"] == "true", "expected to get value of global set environment")
+						assert.Truef(t, len(s.Environment) > 10, "expected to have a lot of built-in variables")
+						s.Environment = nil
+
+						if len(s.SecretMapping) == 0 {
+							s.SecretMapping = nil
+						}
 					}
 				}
 				// check if we get an expected backend config based on a frontend config
@@ -330,18 +460,18 @@ func TestSecretMatch(t *testing.T) {
 	tcl := []*struct {
 		name   string
 		secret Secret
-		event  string
+		event  metadata.Event
 		match  bool
 	}{
 		{
 			name:   "should match event",
-			secret: Secret{Events: []string{"pull_request"}},
+			secret: Secret{Events: []metadata.Event{"pull_request"}},
 			event:  "pull_request",
 			match:  true,
 		},
 		{
 			name:   "should not match event",
-			secret: Secret{Events: []string{"pull_request"}},
+			secret: Secret{Events: []metadata.Event{"pull_request"}},
 			event:  "push",
 			match:  false,
 		},
@@ -353,8 +483,14 @@ func TestSecretMatch(t *testing.T) {
 		},
 		{
 			name:   "pull close should match pull",
-			secret: Secret{Events: []string{"pull_request"}},
+			secret: Secret{Events: []metadata.Event{"pull_request"}},
 			event:  "pull_request_closed",
+			match:  true,
+		},
+		{
+			name:   "pull metadata change should match pull",
+			secret: Secret{Events: []metadata.Event{"pull_request"}},
+			event:  "pull_request_metadata",
 			match:  true,
 		},
 	}
@@ -378,7 +514,7 @@ func TestCompilerCompilePrivileged(t *testing.T) {
 				{
 					Name:      "privileged-plugin",
 					Image:     "test/image",
-					DependsOn: []string{}, // no dependencies =>  enable dag mode & all steps are executed in parallel
+					DependsOn: constraint.DependsOn{}, // no dependencies =>  enable dag mode & all steps are executed in parallel
 				},
 				{
 					Name:     "no-plugin",

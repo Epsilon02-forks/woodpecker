@@ -9,6 +9,7 @@
       v-if="!selectedSecret"
       v-model="secrets"
       :is-deleting="isDeleting"
+      :loading="loading"
       @edit="editSecret"
       @delete="deleteSecret"
     />
@@ -24,7 +25,6 @@
 </template>
 
 <script lang="ts" setup>
-import { cloneDeep } from 'lodash';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 
@@ -40,6 +40,7 @@ import { usePagination } from '~/compositions/usePaginate';
 import { useWPTitle } from '~/compositions/useWPTitle';
 import { WebhookEvents } from '~/lib/api/types';
 import type { Secret } from '~/lib/api/types';
+import { deepClone } from '~/lib/utils';
 
 const emptySecret: Partial<Secret> = {
   name: '',
@@ -60,7 +61,7 @@ async function loadSecrets(page: number): Promise<Secret[] | null> {
   return apiClient.getOrgSecretList(org.value.id, { page });
 }
 
-const { resetPage, data: secrets } = usePagination(loadSecrets, () => !selectedSecret.value);
+const { resetPage, data: secrets, loading } = usePagination(loadSecrets, () => !selectedSecret.value);
 
 const { doSubmit: createSecret, isLoading: isSaving } = useAsyncAction(async () => {
   if (!selectedSecret.value) {
@@ -77,21 +78,21 @@ const { doSubmit: createSecret, isLoading: isSaving } = useAsyncAction(async () 
     type: 'success',
   });
   selectedSecret.value = undefined;
-  resetPage();
+  await resetPage();
 });
 
 const { doSubmit: deleteSecret, isLoading: isDeleting } = useAsyncAction(async (_secret: Secret) => {
   await apiClient.deleteOrgSecret(org.value.id, _secret.name);
   notifications.notify({ title: i18n.t('secrets.deleted'), type: 'success' });
-  resetPage();
+  await resetPage();
 });
 
 function editSecret(secret: Secret) {
-  selectedSecret.value = cloneDeep(secret);
+  selectedSecret.value = deepClone(secret);
 }
 
 function showAddSecret() {
-  selectedSecret.value = cloneDeep(emptySecret);
+  selectedSecret.value = deepClone(emptySecret);
 }
 
 useWPTitle(computed(() => [i18n.t('secrets.secrets'), org.value.name]));

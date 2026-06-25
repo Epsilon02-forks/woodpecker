@@ -21,8 +21,7 @@ import (
 	"go.woodpecker-ci.org/woodpecker/v3/server/cache"
 	"go.woodpecker-ci.org/woodpecker/v3/server/logging"
 	"go.woodpecker-ci.org/woodpecker/v3/server/model"
-	"go.woodpecker-ci.org/woodpecker/v3/server/pubsub"
-	"go.woodpecker-ci.org/woodpecker/v3/server/queue"
+	"go.woodpecker-ci.org/woodpecker/v3/server/scheduler"
 	"go.woodpecker-ci.org/woodpecker/v3/server/services"
 	"go.woodpecker-ci.org/woodpecker/v3/server/services/log"
 	"go.woodpecker-ci.org/woodpecker/v3/server/services/permissions"
@@ -30,36 +29,37 @@ import (
 
 var Config = struct {
 	Services struct {
-		Pubsub     *pubsub.Publisher
-		Queue      queue.Queue
+		Scheduler  scheduler.Scheduler
 		Logs       logging.Log
 		Membership cache.MembershipService
 		Manager    services.Manager
 		LogStore   log.Service
 	}
 	Server struct {
-		JWTSecret           string
-		Key                 string
-		Cert                string
-		OAuthHost           string
-		Host                string
-		WebhookHost         string
-		Port                string
-		PortTLS             string
-		AgentToken          string
-		StatusContext       string
-		StatusContextFormat string
-		SessionExpires      time.Duration
-		RootPath            string
-		CustomCSSFile       string
-		CustomJsFile        string
+		JWTSecret             string
+		Key                   string
+		Cert                  string
+		OAuthHost             string
+		Host                  string
+		WebhookHost           string
+		Port                  string
+		PortTLS               string
+		AgentToken            string
+		StatusContext         string
+		StatusContextFormat   string
+		SessionExpires        time.Duration
+		RootPath              string
+		CustomCSSFile         string
+		CustomJsFile          string
+		AsyncRepositoryUpdate bool
 	}
 	Agent struct {
 		DisableUserRegisteredAgentRegistration bool
 	}
 	WebUI struct {
-		EnableSwagger    bool
-		SkipVersionCheck bool
+		EnableSwagger           bool
+		SkipVersionCheck        bool
+		MaxPipelineLogLineCount uint
 	}
 	Prometheus struct {
 		AuthToken string
@@ -68,6 +68,7 @@ var Config = struct {
 		AuthenticatePublicRepos             bool
 		DefaultAllowPullRequests            bool
 		DefaultCancelPreviousPipelineEvents []model.WebhookEvent
+		DefaultApprovalMode                 model.ApprovalMode
 		DefaultWorkflowLabels               map[string]string
 		DefaultClonePlugin                  string
 		TrustedClonePlugins                 []string
@@ -81,6 +82,10 @@ var Config = struct {
 			HTTP  string
 			HTTPS string
 		}
+		ConfigPaths      []string
+		ConfigExtensions []string
+		// TODO: remove with version 4.x
+		ForceIgnoreServiceFailure bool
 	}
 	Permissions struct {
 		Open            bool

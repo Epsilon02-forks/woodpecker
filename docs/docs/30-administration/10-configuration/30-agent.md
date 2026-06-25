@@ -63,7 +63,7 @@ To get an _agent token_ you have to register the agent manually in the server us
 - Name: `WOODPECKER_SERVER`
 - Default: `localhost:9000`
 
-Configures gRPC address of the server.
+Configures gRPC address to the server. If you want to use an unix socket add `unix://` prefix and the path.
 
 ---
 
@@ -148,6 +148,19 @@ Configures the number of parallel workflows.
 
 ---
 
+### AGENT_SINGLE_WORKFLOW
+
+- Name: `WOODPECKER_AGENT_SINGLE_WORKFLOW`
+- Default: `false`
+
+Configures the agent to exit (shutdown) after executing one workflow. When configured,
+`WOODPECKER_MAX_WORKFLOWS` is forced to 1.
+
+This one-shot mode is useful in ephemeral environments that are provisioned on demand
+by external automation — for example, when an autoscaler spins up a dedicated machine. In these setups, the agent starts, executes exactly one workflow, and exits, allowing the environment to be cleanly torn down afterward.
+
+---
+
 ### AGENT_LABELS
 
 - Name: `WOODPECKER_AGENT_LABELS`
@@ -155,7 +168,8 @@ Configures the number of parallel workflows.
 
 Configures custom labels for the agent, to let workflows filter by it.
 Use a list of key-value pairs like `key=value,second-key=*`. `*` can be used as a wildcard.
-By default, agents provide three additional labels `platform=os/arch`, `hostname=my-agent` and `repo=*` which can be overwritten if needed.
+If you use `!` as key prefix it is mandatory for the workflow to have that label set (without !) set and matched.
+By default, agents provide four additional labels `platform=os/arch`, `hostname=my-agent`, `backend=my-backend` and `repo=*` which can be overwritten if needed.
 To learn how labels work, check out the [pipeline syntax page](../../20-usage/20-workflow-syntax.md#labels).
 
 ---
@@ -201,7 +215,7 @@ After pinging for a keepalive check, the agent waits for a duration of this time
 - Name: `WOODPECKER_GRPC_SECURE`
 - Default: `false`
 
-Configures if the connection to `WOODPECKER_SERVER` should be made using a secure transport.
+Configures if the connection to `WOODPECKER_SERVER` should be made using a secure transport (tls).
 
 ---
 
@@ -211,6 +225,19 @@ Configures if the connection to `WOODPECKER_SERVER` should be made using a secur
 - Default: `true`
 
 Configures if the gRPC server certificate should be verified, only valid when `WOODPECKER_GRPC_SECURE` is `true`.
+
+---
+
+## RETRY_TIMEOUT
+
+- Name: `WOODPECKER_RETRY_TIMEOUT`
+- Default: `2m`
+
+Set how long the agent keeps retrying to reconnect to the server after the gRPC connection is lost before giving up.
+
+:::warning
+If set to 0 we retry forever.
+:::
 
 ---
 

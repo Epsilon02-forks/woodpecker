@@ -19,6 +19,8 @@ The following metadata labels are supported:
 - `woodpecker-ci.org/repo-full-name`
 - `woodpecker-ci.org/branch`
 - `woodpecker-ci.org/org-id`
+- `woodpecker-ci.org/task-uuid`
+- `woodpecker-ci.org/step`
 
 ## Private registries
 
@@ -78,6 +80,45 @@ steps:
 ```
 
 To give steps access to the Kubernetes API via service account, take a look at [RBAC Authorization](https://kubernetes.io/docs/reference/access-authn-authz/rbac/)
+
+### Workspace volume
+
+`workspaceVolume` controls whether the default workspace volume is mounted into a service Pod. It only affects service
+containers and does not disable explicitly configured service volumes.
+
+If unset, the default workspace volume is mounted.
+
+```yaml
+services:
+  postgres:
+    image: postgres:16
+    backend_options:
+      kubernetes:
+        workspaceVolume: false
+```
+
+### User namespaces
+
+`hostUsers` controls whether the Pod uses the host's user namespace. When set to `false`, Kubernetes runs the Pod in a dedicated user namespace where UID 0 inside the container maps to a non-root UID on the host, providing an additional layer of isolation.
+
+See the [Kubernetes documentation](https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/) for more information on user namespaces.
+
+```yaml
+steps:
+  - name: build
+    image: alpine
+    commands:
+      - whoami
+    backend_options:
+      kubernetes:
+        hostUsers: false
+        securityContext:
+          runAsUser: 0
+```
+
+:::note
+User namespaces require Kubernetes v1.25+ with the `UserNamespacesSupport` feature gate enabled, and a compatible container runtime (e.g. CRI-O, containerd v2.0+).
+:::
 
 ### Node selector
 
@@ -143,6 +184,100 @@ steps:
             value: 'value1'
             effect: 'NoSchedule'
             tolerationSeconds: 3600
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: topology.kubernetes.io/zone
+                      operator: In
+                      values:
+                        - eu-central-1a
+                        - eu-central-1b
+```
+
+### Affinity
+
+Kubernetes [affinity and anti-affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity) rules allow you to constrain which nodes your pods can be scheduled on based on node labels, or co-locate/spread pods relative to other pods.
+
+You can configure affinity at two levels:
+
+1. **Per-step via `backend_options.kubernetes.affinity`** (shown in example above) - requires agent configuration to allow it
+2. **Agent-wide via `WOODPECKER_BACKEND_K8S_POD_AFFINITY`** - applies to all pods unless overridden
+
+#### Agent-wide affinity
+
+To apply affinity rules to all workflow pods, configure the agent with YAML-formatted affinity:
+
+```yaml
+WOODPECKER_BACKEND_K8S_POD_AFFINITY: |
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node-role.kubernetes.io/worker
+              operator: In
+              values:
+                - "true"
+```
+
+By default, per-step affinity settings are **not allowed** for security reasons. To enable them:
+
+```bash
+WOODPECKER_BACKEND_K8S_POD_AFFINITY_ALLOW_FROM_STEP: true
+```
+
+:::warning
+Enabling `WOODPECKER_BACKEND_K8S_POD_AFFINITY_ALLOW_FROM_STEP` in multi-tenant environments allows pipeline authors to control pod placement, which may have security or resource isolation implications.
+:::
+
+When per-step affinity is allowed and specified, it **replaces** the agent-wide affinity entirely (not merged).
+
+#### Example: agent affinity for co-location
+
+This example configures all workflow pods within a workflow to be co-located on the same node, while requiring other workflows run on different nodes.
+
+It uses `matchLabelKeys` to dynamically match pods with the same `woodpecker-ci.org/task-uuid`, and `mismatchLabelKeys` to separating pods with different task UUIDs:
+
+```yaml
+WOODPECKER_BACKEND_K8S_POD_AFFINITY: |
+  podAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector: {}
+      matchLabelKeys:
+        - woodpecker-ci.org/task-uuid
+      topologyKey: "kubernetes.io/hostname"
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector: {}
+      mismatchLabelKeys:
+      - woodpecker-ci.org/task-uuid
+      topologyKey: "kubernetes.io/hostname"
+```
+
+:::note
+The `matchLabelKeys` and `mismatchLabelKeys` features require Kubernetes v1.29+ (alpha with feature gate `MatchLabelKeysInPodAffinity`) or v1.33+ (beta, enabled by default). These fields allow the Kubernetes API server to dynamically populate label selectors at pod creation time, eliminating the need to hardcode values like `$(WOODPECKER_TASK_UUID)`.
+:::
+
+#### Example: Node affinity for GPU workloads
+
+Ensure a step runs only on GPU-enabled nodes:
+
+```yaml
+steps:
+  - name: train-model
+    image: tensorflow/tensorflow:latest-gpu
+    backend_options:
+      kubernetes:
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: accelerator
+                      operator: In
+                      values:
+                        - nvidia-tesla-v100
 ```
 
 ### Volumes
@@ -151,7 +286,7 @@ To mount volumes a PersistentVolume (PV) and PersistentVolumeClaim (PVC) are nee
 
 Persistent volumes must be created manually. Use the Kubernetes [Persistent Volumes](https://kubernetes.io/docs/concepts/storage/persistent-volumes/) documentation as a reference.
 
-_If your PVC is not highly available or NFS-based, you may also need to integrate affinity settings to ensure that your steps are executed on the correct node._
+_If your PVC is not highly available or NFS-based, use the `affinity` settings (documented above) to ensure that your steps are executed on the correct node._
 
 NOTE: If you plan to use this volume in more than one workflow concurrently, make sure you have configured the PVC in `RWX` mode. Keep in mind that this feature must be supported by the used CSI driver:
 
@@ -250,9 +385,38 @@ backend_options:
         localhostProfile: k8s-apparmor-example-deny-write
 ```
 
+or configure a specific `fsGroupChangePolicy` (Kubernetes defaults to 'Always')
+
+```yaml
+backend_options:
+  kubernetes:
+    securityContext:
+      fsGroupChangePolicy: OnRootMismatch
+```
+
 :::note
 The feature requires Kubernetes v1.30 or above.
 :::
+
+You can set `allowPrivilegeEscalation` to `false` to prevent a container from gaining more privileges than its parent process.
+
+```yaml
+backend_options:
+  kubernetes:
+    securityContext:
+      allowPrivilegeEscalation: false
+```
+
+You can also drop [Linux capabilities](https://man7.org/linux/man-pages/man7/capabilities.7.html) from a container. Adding capabilities is not allowed.
+
+```yaml
+backend_options:
+  kubernetes:
+    securityContext:
+      capabilities:
+        drop:
+          - ALL
+```
 
 ### Annotations and labels
 
@@ -293,6 +457,36 @@ It configures the address of the Kubernetes API server to connect to.
 
 If running the agent within Kubernetes, this will already be set and you don't have to add it manually.
 
+### Headless services
+
+For each workflow run a [headless services](https://kubernetes.io/docs/concepts/services-networking/service/#headless-services) is created,
+and all steps asigned the subdomain that matches the headless service, so any step can reach other steps via DNS by using the step name as hostname.
+
+Using the headless services, the step pod is connected to directly, so any port on the other step pods can be reached.
+
+This is useful for some use-cases, like test-containers in a docker-in-docker setup, where the step needs to connect to many ports on the docker host service.
+
+```yaml
+steps:
+  - name: test
+    image: docker:cli # use 'docker:<major-version>-cli' or similar in production
+    environment:
+      DOCKER_HOST: 'tcp://docker:2376'
+      DOCKER_CERT_PATH: '/woodpecker/dind-certs/client'
+      DOCKER_TLS_VERIFY: '1'
+    commands:
+      - docker run hello-world
+
+  - name: docker
+    image: docker:dind # use 'docker:<major-version>-dind' or similar in production
+    detached: true
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: /woodpecker/dind-certs
+```
+
+If ports are defined on a service, then woodpecker will create a normal service for the pod, which use hosts override using the services cluster IP.
+
 ## Environment variables
 
 These env vars can be set in the `env:` sections of the agent.
@@ -307,6 +501,15 @@ These env vars can be set in the `env:` sections of the agent.
 The namespace to create worker Pods in.
 
 ---
+
+### BACKEND_K8S_NAMESPACE_PER_ORGANIZATION
+
+- Name: `WOODPECKER_BACKEND_K8S_NAMESPACE_PER_ORGANIZATION`
+- Default: `false`
+
+Enables namespace isolation per Woodpecker organization. When enabled, each organization gets its own dedicated Kubernetes namespace for improved security and resource isolation.
+
+With this feature enabled, Woodpecker creates separate Kubernetes namespaces for each organization using the format `{WOODPECKER_BACKEND_K8S_NAMESPACE}-{organization-id}`. Namespaces are created automatically when needed, but they are not automatically deleted when organizations are removed from Woodpecker.
 
 ### BACKEND_K8S_VOLUME_SIZE
 
@@ -371,6 +574,24 @@ Determines if Pod annotations can be defined from a step's backend options.
 
 ---
 
+### BACKEND_K8S_POD_TOLERATIONS
+
+- Name: `WOODPECKER_BACKEND_K8S_POD_TOLERATIONS`
+- Default: none
+
+Additional tolerations to apply to worker Pods. Must be a YAML object, e.g. `[{"effect":"NoSchedule","key":"jobs","operator":"Exists"}]`.
+
+---
+
+### BACKEND_K8S_POD_TOLERATIONS_ALLOW_FROM_STEP
+
+- Name: `WOODPECKER_BACKEND_K8S_POD_TOLERATIONS_ALLOW_FROM_STEP`
+- Default: `true`
+
+Determines if Pod tolerations can be defined from a step's backend options.
+
+---
+
 ### BACKEND_K8S_POD_NODE_SELECTOR
 
 - Name: `WOODPECKER_BACKEND_K8S_POD_NODE_SELECTOR`
@@ -395,3 +616,12 @@ Determines if containers must be required to run as non-root users.
 - Default: none
 
 Secret names to pull images from private repositories. See, how to [Pull an Image from a Private Registry](https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/).
+
+---
+
+### BACKEND_K8S_PRIORITY_CLASS
+
+- Name: `WOODPECKER_BACKEND_K8S_PRIORITY_CLASS`
+- Default: none, which will use the default priority class configured in Kubernetes
+
+Which [Kubernetes PriorityClass](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/priority-class-v1/) to assign to created job pods.

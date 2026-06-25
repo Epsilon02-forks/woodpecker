@@ -15,6 +15,7 @@
 package compiler
 
 import (
+	"maps"
 	"net/url"
 	"path"
 	"strings"
@@ -74,9 +75,7 @@ func WithMetadata(metadata metadata.Metadata) Option {
 	return func(compiler *Compiler) {
 		compiler.metadata = metadata
 
-		for k, v := range metadata.Environ() {
-			compiler.env[k] = v
-		}
+		maps.Copy(compiler.env, metadata.Environ())
 	}
 }
 
@@ -143,9 +142,7 @@ func WithLocal(local bool) Option {
 // added by default to every container in the pipeline.
 func WithEnviron(env map[string]string) Option {
 	return func(compiler *Compiler) {
-		for k, v := range env {
-			compiler.env[k] = v
-		}
+		maps.Copy(compiler.env, env)
 	}
 }
 
@@ -201,4 +198,11 @@ func WithProxy(opt ProxyOptions) Option {
 			"https_proxy": opt.HTTPSProxy,
 		},
 	)
+}
+
+// TODO: remove with version 4.x
+func WithForceIgnoreServiceFailure() Option {
+	return func(c *Compiler) {
+		c.forceIgnoreServiceFailure = true
+	}
 }

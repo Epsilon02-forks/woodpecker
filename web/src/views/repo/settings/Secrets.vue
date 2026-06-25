@@ -9,6 +9,7 @@
       v-if="!selectedSecret"
       :model-value="secrets"
       :is-deleting="isDeleting"
+      :loading="loading"
       @edit="editSecret"
       @delete="deleteSecret"
     />
@@ -24,7 +25,6 @@
 </template>
 
 <script lang="ts" setup>
-import { cloneDeep } from 'lodash';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 
@@ -40,6 +40,7 @@ import { usePagination } from '~/compositions/usePaginate';
 import { useWPTitle } from '~/compositions/useWPTitle';
 import { WebhookEvents } from '~/lib/api/types';
 import type { Secret } from '~/lib/api/types';
+import { deepClone } from '~/lib/utils';
 
 const emptySecret: Partial<Secret> = {
   name: '',
@@ -69,7 +70,11 @@ async function loadSecrets(page: number, level: 'repo' | 'org' | 'global'): Prom
   }
 }
 
-const { resetPage, data: _secrets } = usePagination(loadSecrets, () => !selectedSecret.value, {
+const {
+  resetPage,
+  data: _secrets,
+  loading,
+} = usePagination(loadSecrets, () => !selectedSecret.value, {
   each: ['repo', 'org', 'global'],
 });
 const secrets = computed(() => {
@@ -124,11 +129,11 @@ const { doSubmit: deleteSecret, isLoading: isDeleting } = useAsyncAction(async (
 });
 
 function editSecret(secret: Secret) {
-  selectedSecret.value = cloneDeep(secret);
+  selectedSecret.value = deepClone(secret);
 }
 
 function showAddSecret() {
-  selectedSecret.value = cloneDeep(emptySecret);
+  selectedSecret.value = deepClone(emptySecret);
 }
 
 useWPTitle(computed(() => [i18n.t('secrets.secrets'), repo.value.full_name]));

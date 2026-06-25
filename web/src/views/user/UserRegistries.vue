@@ -18,6 +18,7 @@
       v-if="!selectedRegistry"
       v-model="registries"
       :is-deleting="isDeleting"
+      :loading="loading"
       @edit="editRegistry"
       @delete="deleteRegistry"
     />
@@ -33,7 +34,6 @@
 </template>
 
 <script lang="ts" setup>
-import { cloneDeep } from 'lodash';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 
@@ -48,6 +48,7 @@ import useNotifications from '~/compositions/useNotifications';
 import { usePagination } from '~/compositions/usePaginate';
 import { useWPTitle } from '~/compositions/useWPTitle';
 import type { Registry } from '~/lib/api/types';
+import { deepClone } from '~/lib/utils';
 
 const emptyRegistry: Partial<Registry> = {
   address: '',
@@ -74,7 +75,7 @@ async function loadRegistries(page: number): Promise<Registry[] | null> {
   return apiClient.getOrgRegistryList(user.org_id, { page });
 }
 
-const { resetPage, data: registries } = usePagination(loadRegistries, () => !selectedRegistry.value);
+const { resetPage, data: registries, loading } = usePagination(loadRegistries, () => !selectedRegistry.value);
 
 const { doSubmit: createRegistry, isLoading: isSaving } = useAsyncAction(async () => {
   if (!selectedRegistry.value) {
@@ -91,21 +92,21 @@ const { doSubmit: createRegistry, isLoading: isSaving } = useAsyncAction(async (
     type: 'success',
   });
   selectedRegistry.value = undefined;
-  resetPage();
+  await resetPage();
 });
 
 const { doSubmit: deleteRegistry, isLoading: isDeleting } = useAsyncAction(async (_registry: Registry) => {
   await apiClient.deleteOrgRegistry(user.org_id, _registry.address);
   notifications.notify({ title: i18n.t('registries.deleted'), type: 'success' });
-  resetPage();
+  await resetPage();
 });
 
 function editRegistry(registry: Registry) {
-  selectedRegistry.value = cloneDeep(registry);
+  selectedRegistry.value = deepClone(registry);
 }
 
 function showAddRegistry() {
-  selectedRegistry.value = cloneDeep(emptyRegistry);
+  selectedRegistry.value = deepClone(emptyRegistry);
 }
 
 useWPTitle(computed(() => [i18n.t('registries.registries'), i18n.t('user.settings.settings')]));

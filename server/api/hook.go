@@ -34,63 +34,28 @@ import (
 	"go.woodpecker-ci.org/woodpecker/v3/shared/token"
 )
 
-// GetQueueInfo
-//
-//	@Summary		Get pipeline queue information
-//	@Description	TODO: link the InfoT response object - this is blocked, until the `swaggo/swag` tool dependency is v1.18.12 or newer
-//	@Router			/queue/info [get]
-//	@Produce		json
-//	@Success		200	{object}	map[string]string
-//	@Tags			Pipeline queues
-//	@Param			Authorization	header	string	true	"Insert your personal access token"	default(Bearer <personal access token>)
-func GetQueueInfo(c *gin.Context) {
-	c.IndentedJSON(http.StatusOK,
-		server.Config.Services.Queue.Info(c),
-	)
-}
-
-// PauseQueue
-//
-//	@Summary	Pause the pipeline queue
-//	@Router		/queue/pause [post]
-//	@Produce	plain
-//	@Success	204
-//	@Tags		Pipeline queues
-//	@Param		Authorization	header	string	true	"Insert your personal access token"	default(Bearer <personal access token>)
-func PauseQueue(c *gin.Context) {
-	server.Config.Services.Queue.Pause()
-	c.Status(http.StatusNoContent)
-}
-
-// ResumeQueue
-//
-//	@Summary	Resume the pipeline queue
-//	@Router		/queue/resume [post]
-//	@Produce	plain
-//	@Success	204
-//	@Tags		Pipeline queues
-//	@Param		Authorization	header	string	true	"Insert your personal access token"	default(Bearer <personal access token>)
-func ResumeQueue(c *gin.Context) {
-	server.Config.Services.Queue.Resume()
-	c.Status(http.StatusNoContent)
-}
-
-// BlockTilQueueHasRunningItem
-//
-//	@Summary	Block til pipeline queue has a running item
-//	@Router		/queue/norunningpipelines [get]
-//	@Produce	plain
-//	@Success	204
-//	@Tags		Pipeline queues
-//	@Param		Authorization	header	string	true	"Insert your personal access token"	default(Bearer <personal access token>)
-func BlockTilQueueHasRunningItem(c *gin.Context) {
-	for {
-		info := server.Config.Services.Queue.Info(c)
-		if info.Stats.Running == 0 {
-			break
-		}
+// getAgentName finds an agent's name, utilizing a map as a cache.
+func getAgentName(store store.Store, agentNameMap map[int64]string, agentID int64) (string, bool) {
+	// 1. Check the cache first.
+	name, exists := agentNameMap[agentID]
+	if exists {
+		return name, true
 	}
-	c.Status(http.StatusNoContent)
+
+	// 2. If not in cache, query the store.
+	agent, err := store.AgentFind(agentID)
+	if err != nil || agent == nil {
+		// Agent not found or an error occurred.
+		return "", false
+	}
+
+	// 3. Found the agent, update the cache and return the name.
+	if agent.Name != "" {
+		agentNameMap[agentID] = agent.Name
+		return agent.Name, true
+	}
+
+	return "", false
 }
 
 // PostHook
@@ -229,7 +194,7 @@ func PostHook(c *gin.Context) {
 	// 5. Check if pull requests are allowed for this repo
 	//
 
-	if (pipelineFromForge.Event == model.EventPull || pipelineFromForge.Event == model.EventPullClosed) && !repo.AllowPull {
+	if pipelineFromForge.IsPullRequest() && !repo.AllowPull {
 		log.Debug().Str("repo", repo.FullName).Msg("ignoring hook: pull requests are disabled for this repo in woodpecker")
 		c.Status(http.StatusNoContent)
 		return
@@ -249,13 +214,12 @@ func PostHook(c *gin.Context) {
 
 func getRepoFromToken(store store.Store, t *token.Token) (*model.Repo, error) {
 	if t.Get("repo-forge-remote-id") != "" {
-		// TODO: use both the forge ID and repo forge remote ID
-		/*forgeID, err := strconv.ParseInt(t.Get("forge-id"), 10, 64)
+		forgeID, err := strconv.ParseInt(t.Get("forge-id"), 10, 64)
 		if err != nil {
 			return nil, err
-		}*/
+		}
 
-		return store.GetRepoForgeID(model.ForgeRemoteID(t.Get("repo-forge-remote-id")))
+		return store.GetRepoForgeID(forgeID, model.ForgeRemoteID(t.Get("repo-forge-remote-id")))
 	}
 
 	// get the repo by the repo-id

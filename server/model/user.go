@@ -34,14 +34,14 @@ type User struct {
 	// required: true
 	ID int64 `json:"id" xorm:"pk autoincr 'id'"`
 
-	ForgeID int64 `json:"forge_id,omitempty" xorm:"forge_id"`
+	ForgeID int64 `json:"forge_id,omitempty" xorm:"forge_id UNIQUE(forge_id) UNIQUE(forge_login)"`
 
-	ForgeRemoteID ForgeRemoteID `json:"-" xorm:"forge_remote_id"`
+	ForgeRemoteID ForgeRemoteID `json:"forge_remote_id" xorm:"forge_remote_id UNIQUE(forge_id)"`
 
 	// Login is the username for this user.
 	//
 	// required: true
-	Login string `json:"login"  xorm:"UNIQUE 'login'"`
+	Login string `json:"login"  xorm:"'login' UNIQUE(forge_login)"`
 
 	// AccessToken is the oauth2 access token.
 	AccessToken string `json:"-"  xorm:"TEXT 'access_token'"`
@@ -66,12 +66,14 @@ type User struct {
 	// environment variable, this value will be set to true on login.
 	Admin bool `json:"admin,omitempty" xorm:"admin"`
 
+	AdminEnv bool `json:"admin_env,omitempty" xorm:"-"`
+
 	// Hash is a unique token used to sign tokens.
 	Hash string `json:"-" xorm:"UNIQUE varchar(500) 'hash'"`
 
 	// OrgID is the of the user as model.Org.
 	OrgID int64 `json:"org_id" xorm:"org_id"`
-} //	@name User
+} //	@name	User
 
 // TableName return database table name for xorm.
 func (User) TableName() string {
